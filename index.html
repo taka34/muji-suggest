@@ -20,7 +20,7 @@
     input, textarea, button { font-family: inherit; }
     a { color: inherit; text-decoration: none; }
     @keyframes pulse {
-      0%, 100% { opacity: 0.2; }
+      0%, 100% { opacity: 0.4; }
       50% { opacity: 1; }
     }
     @keyframes fadeIn {
@@ -30,6 +30,10 @@
     @keyframes spin {
       from { transform: rotate(0deg); }
       to { transform: rotate(360deg); }
+    }
+    @keyframes shimmer {
+      0% { background-position: -200px 0; }
+      100% { background-position: 200px 0; }
     }
   </style>
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -41,6 +45,7 @@
   <script type="text/babel" data-presets="react">
     const { useState, useEffect } = React;
     const API_KEY_STORAGE = 'muji_anthropic_api_key';
+    const TARGET_PRODUCTS = 6;
 
     const svgProps = {
       viewBox: "0 0 80 80",
@@ -65,7 +70,6 @@
         </svg>
       );
     }
-
     function ClothingIcon() {
       return (
         <svg {...svgProps}>
@@ -73,7 +77,6 @@
         </svg>
       );
     }
-
     function FoodIcon() {
       return (
         <svg {...svgProps}>
@@ -84,7 +87,6 @@
         </svg>
       );
     }
-
     function StationeryIcon() {
       return (
         <svg {...svgProps}>
@@ -96,7 +98,6 @@
         </svg>
       );
     }
-
     function InteriorIcon() {
       return (
         <svg {...svgProps}>
@@ -111,7 +112,6 @@
         </svg>
       );
     }
-
     function BeddingIcon() {
       return (
         <svg {...svgProps}>
@@ -123,7 +123,6 @@
         </svg>
       );
     }
-
     function AromaIcon() {
       return (
         <svg {...svgProps}>
@@ -134,7 +133,6 @@
         </svg>
       );
     }
-
     function OutdoorIcon() {
       return (
         <svg {...svgProps}>
@@ -145,7 +143,6 @@
         </svg>
       );
     }
-
     function BeautyIcon() {
       return (
         <svg {...svgProps}>
@@ -156,7 +153,6 @@
         </svg>
       );
     }
-
     function KitchenIcon() {
       return (
         <svg {...svgProps}>
@@ -167,7 +163,6 @@
         </svg>
       );
     }
-
     function DefaultIcon() {
       return (
         <svg {...svgProps}>
@@ -177,7 +172,6 @@
         </svg>
       );
     }
-
     function CategoryIllustration({ category }) {
       const cat = (category || '');
       if (cat.includes('収納') || cat.includes('整理') || cat.includes('整頓')) return <StorageIcon />;
@@ -191,6 +185,58 @@
       if (cat.includes('美容') || cat.includes('化粧') || cat.includes('スキンケア') || cat.includes('ヘア')) return <BeautyIcon />;
       if (cat.includes('キッチン') || cat.includes('調理') || cat.includes('クッキング')) return <KitchenIcon />;
       return <DefaultIcon />;
+    }
+
+    function extractSummary(text) {
+      const match = text.match(/"summary"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+      if (!match) return '';
+      try {
+        return JSON.parse('"' + match[1] + '"');
+      } catch (e) {
+        return match[1];
+      }
+    }
+
+    function extractCompleteProducts(text) {
+      const productsKeyIdx = text.indexOf('"products"');
+      if (productsKeyIdx === -1) return [];
+      const arrayStartIdx = text.indexOf('[', productsKeyIdx);
+      if (arrayStartIdx === -1) return [];
+      const products = [];
+      let depth = 0;
+      let objStart = -1;
+      let inString = false;
+      let escape = false;
+      for (let i = arrayStartIdx + 1; i < text.length; i++) {
+        const c = text[i];
+        if (escape) { escape = false; continue; }
+        if (c === '\\') { escape = true; continue; }
+        if (c === '"') { inString = !inString; continue; }
+        if (inString) continue;
+        if (c === '{') { if (depth === 0) objStart = i; depth++; }
+        else if (c === '}') {
+          depth--;
+          if (depth === 0 && objStart !== -1) {
+            try {
+              const obj = JSON.parse(text.substring(objStart, i + 1));
+              products.push(obj);
+            } catch (e) {}
+            objStart = -1;
+          }
+        }
+      }
+      return products;
+    }
+
+    function SkeletonCard({ index }) {
+      return (
+        <div style={{background:'#FAFAF8',border:'1px dashed #D9D2C2',padding:'20px',minHeight:340,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:14,animation:'pulse 2.4s ease-in-out infinite'}}>
+          <div style={{width:18,height:18,border:'2px solid #EAE6DC',borderTopColor:'#C7321F',borderRadius:'50%',animation:'spin 0.9s linear infinite'}} />
+          <div style={{fontSize:10,color:'#A8A39A',letterSpacing:'0.2em'}}>
+            {String(index+1).padStart(2,'0')} / 準備中
+          </div>
+        </div>
+      );
     }
 
     function App() {
@@ -281,7 +327,8 @@
 
 必ず6点提案すること。商品はそれぞれ異なるカテゴリ・タイプから選び、多様性を持たせること。
 productUrlとarticleUrlは実際に検索で見つけた無印公式サイトの正確なURLを記載すること。
-該当するおたよりブログ記事が見つからない場合は、articleUrlとarticleTitleは空文字列""にすること。`;
+該当するおたよりブログ記事が見つからない場合は、articleUrlとarticleTitleは空文字列""にすること。
+JSONは "summary" を先に書き、その後 "products" 配列に1点ずつ完結したオブジェクトを順次書くこと（途中で他のフィールドを挟まない）。`;
 
         try {
           const response = await fetch('https://api.anthropic.com/v1/messages', {
@@ -296,6 +343,7 @@ productUrlとarticleUrlは実際に検索で見つけた無印公式サイトの
               model: 'claude-sonnet-4-5',
               max_tokens: 8000,
               system: systemPrompt,
+              stream: true,
               tools: [
                 {
                   type: 'web_search_20250305',
@@ -307,29 +355,65 @@ productUrlとarticleUrlは実際に検索で見つけた無印公式サイトの
             }),
           });
 
-          const data = await response.json();
           if (!response.ok) {
+            let errData = {};
+            try { errData = await response.json(); } catch (e) {}
             if (response.status === 401) {
               setError('APIキーが無効です。設定から再入力してください。');
             } else {
-              setError(data.error?.message || 'APIエラーが発生しました');
+              setError(errData.error?.message || ('APIエラー: ' + response.status));
             }
             return;
           }
 
-          let text = (data.content || [])
-            .filter((b) => b.type === 'text')
-            .map((b) => b.text)
-            .join('\n');
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+          let accumulatedText = '';
+          let lastProductCount = 0;
+          let lastSummary = '';
 
-          const firstBrace = text.indexOf('{');
-          const lastBrace = text.lastIndexOf('}');
-          if (firstBrace !== -1 && lastBrace !== -1) {
-            text = text.substring(firstBrace, lastBrace + 1);
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+
+            let newlineIdx;
+            while ((newlineIdx = buffer.indexOf('\n')) !== -1) {
+              const line = buffer.substring(0, newlineIdx);
+              buffer = buffer.substring(newlineIdx + 1);
+              if (!line.startsWith('data: ')) continue;
+              const dataStr = line.substring(6).trim();
+              if (!dataStr || dataStr === '[DONE]') continue;
+              try {
+                const evt = JSON.parse(dataStr);
+                if (evt.type === 'content_block_delta' && evt.delta?.type === 'text_delta') {
+                  accumulatedText += evt.delta.text;
+                  const summary = extractSummary(accumulatedText);
+                  const products = extractCompleteProducts(accumulatedText);
+                  if (summary !== lastSummary || products.length !== lastProductCount) {
+                    lastSummary = summary;
+                    lastProductCount = products.length;
+                    setResult({ summary, products });
+                  }
+                }
+              } catch (e) {}
+            }
           }
 
-          const parsed = JSON.parse(text);
-          setResult(parsed);
+          // Final parse pass
+          try {
+            let text = accumulatedText;
+            const firstBrace = text.indexOf('{');
+            const lastBrace = text.lastIndexOf('}');
+            if (firstBrace !== -1 && lastBrace !== -1) {
+              text = text.substring(firstBrace, lastBrace + 1);
+              const finalParsed = JSON.parse(text);
+              if (finalParsed.products && finalParsed.products.length >= lastProductCount) {
+                setResult(finalParsed);
+              }
+            }
+          } catch (e) {}
         } catch (e) {
           console.error(e);
           setError('エラー: ' + (e.message || JSON.stringify(e)));
@@ -369,6 +453,9 @@ productUrlとarticleUrlは実際に検索で見つけた無印公式サイトの
         );
       }
 
+      const productsArrived = result?.products?.length || 0;
+      const showingResults = loading || result;
+
       return (
         <div style={{minHeight:'100vh',background:'#FFFFFF'}}>
           <div style={{borderBottom:'1px solid #EAE6DC',padding:'14px 20px',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
@@ -389,7 +476,7 @@ productUrlとarticleUrlは実際に検索で見つけた無印公式サイトの
               </p>
             </header>
 
-            <div style={{background:'#FAF8F3',border:'1px solid #EAE6DC',padding:24,marginBottom:24,maxWidth:680,margin:'0 auto 24px'}}>
+            <div style={{background:'#FAF8F3',border:'1px solid #EAE6DC',padding:24,maxWidth:680,margin:'0 auto 24px'}}>
               <textarea value={input} onChange={(e)=>setInput(e.target.value)} placeholder="例：来週から在宅勤務がはじまります" rows={3}
                 style={{width:'100%',border:'none',outline:'none',resize:'none',fontSize:15,lineHeight:1.8,color:'#1F1D18',background:'transparent'}} />
               <button onClick={()=>handleSubmit()} disabled={loading||!input.trim()}
@@ -398,8 +485,8 @@ productUrlとarticleUrlは実際に検索で見つけた無印公式サイトの
               </button>
             </div>
 
-            {!result && !loading && (
-              <div style={{marginBottom:40,maxWidth:680,margin:'0 auto 40px'}}>
+            {!showingResults && !error && (
+              <div style={{maxWidth:680,margin:'0 auto 40px'}}>
                 <p style={{fontSize:11,color:'#8B8780',letterSpacing:'0.2em',marginBottom:12}}>ためしてみる</p>
                 <div style={{display:'flex',flexWrap:'wrap',gap:8}}>
                   {examples.map((ex)=>(
@@ -412,44 +499,41 @@ productUrlとarticleUrlは実際に検索で見つけた無印公式サイトの
               </div>
             )}
 
-            {loading && (
-              <div style={{textAlign:'center',padding:'60px 20px'}}>
-                <div style={{display:'inline-block',width:18,height:18,border:'2px solid #EAE6DC',borderTopColor:'#C7321F',borderRadius:'50%',animation:'spin 0.9s linear infinite',marginBottom:20}} />
-                <div style={{fontSize:13,color:'#6B6760',letterSpacing:'0.05em',animation:'pulse 2s ease-in-out infinite'}}>
-                  {loadingMsg}…
-                </div>
-                <div style={{fontSize:11,color:'#A8A39A',marginTop:12,letterSpacing:'0.05em'}}>
-                  6点の商品を検索のため、20〜45秒ほどお時間をいただきます
-                </div>
-              </div>
-            )}
-
             {error && (
               <div style={{padding:18,background:'#FFF5F3',border:'1px solid #E8C5BD',color:'#8B2818',fontSize:13,lineHeight:1.7,maxWidth:680,margin:'0 auto'}}>
                 {error}
               </div>
             )}
 
-            {result && (
+            {showingResults && !error && (
               <div style={{animation:'fadeIn 0.6s ease-out'}}>
-                <div style={{fontFamily:"'Shippori Mincho B1', serif",fontSize:18,lineHeight:1.8,padding:'24px 0',borderTop:'1px solid #1F1D18',borderBottom:'1px solid #EAE6DC',margin:'8px auto 32px',color:'#1F1D18',maxWidth:680}}>
-                  {result.summary}
-                </div>
+                {result?.summary && (
+                  <div style={{fontFamily:"'Shippori Mincho B1', serif",fontSize:18,lineHeight:1.8,padding:'24px 0',borderTop:'1px solid #1F1D18',borderBottom:'1px solid #EAE6DC',margin:'8px auto 32px',color:'#1F1D18',maxWidth:680,animation:'fadeIn 0.5s ease-out'}}>
+                    {result.summary}
+                  </div>
+                )}
 
                 <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:20,maxWidth:680,margin:'0 auto 20px'}}>
                   <p style={{fontSize:11,color:'#8B8780',letterSpacing:'0.25em',margin:0}}>おすすめの商品</p>
-                  <p style={{fontSize:10,color:'#A8A39A',margin:0,letterSpacing:'0.05em'}}>{result.products.length}点</p>
+                  <p style={{fontSize:10,color:'#A8A39A',margin:0,letterSpacing:'0.05em'}}>
+                    {loading ? `${productsArrived} / ${TARGET_PRODUCTS}点 受信中` : `${productsArrived}点`}
+                  </p>
                 </div>
 
+                {loading && (
+                  <div style={{textAlign:'center',padding:'8px 0 24px',color:'#6B6760',fontSize:12,letterSpacing:'0.05em',animation:'pulse 2s ease-in-out infinite'}}>
+                    {loadingMsg}…
+                  </div>
+                )}
+
                 <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(300px, 1fr))',gap:12}}>
-                  {result.products.map((p,i)=>(
-                    <div key={i} style={{background:'#FFFFFF',border:'1px solid #EAE6DC',padding:'20px 20px 16px',display:'flex',flexDirection:'column'}}>
+                  {(result?.products || []).map((p,i)=>(
+                    <div key={i} style={{background:'#FFFFFF',border:'1px solid #EAE6DC',padding:'20px 20px 16px',display:'flex',flexDirection:'column',animation:'fadeIn 0.5s ease-out'}}>
                       <div style={{textAlign:'center',padding:'4px 0 12px'}}>
                         <div style={{width:44,height:44,margin:'0 auto',opacity:0.85}}>
                           <CategoryIllustration category={p.category} />
                         </div>
                       </div>
-
                       <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10}}>
                         <span style={{fontSize:10,color:'#C7321F',letterSpacing:'0.15em',fontWeight:500}}>
                           {String(i+1).padStart(2,'0')}
@@ -458,15 +542,12 @@ productUrlとarticleUrlは実際に検索で見つけた無印公式サイトの
                           {p.category}
                         </span>
                       </div>
-
                       <h3 style={{fontFamily:"'Shippori Mincho B1', serif",fontSize:16,fontWeight:500,margin:'0 0 12px',lineHeight:1.5,color:'#1F1D18'}}>
                         {p.name}
                       </h3>
-
                       <p style={{fontSize:12,lineHeight:1.9,color:'#3A3833',margin:'0 0 14px'}}>
                         {p.why}
                       </p>
-
                       <div style={{background:'#FAF8F3',padding:'14px 16px',marginBottom:14,flex:1}}>
                         <div style={{fontSize:9,color:'#8B8780',letterSpacing:'0.2em',marginBottom:8,fontWeight:500}}>
                           おすすめの使い方
@@ -481,7 +562,6 @@ productUrlとarticleUrlは実際に検索で見つけた無印公式サイトの
                           </a>
                         )}
                       </div>
-
                       {p.productUrl && (
                         <div style={{textAlign:'right'}}>
                           <a href={p.productUrl} target="_blank" rel="noopener noreferrer"
@@ -492,16 +572,22 @@ productUrlとarticleUrlは実際に検索で見つけた無印公式サイトの
                       )}
                     </div>
                   ))}
+
+                  {loading && Array.from({length: Math.max(0, TARGET_PRODUCTS - productsArrived)}).map((_, i) => (
+                    <SkeletonCard key={`skel-${i}`} index={productsArrived + i} />
+                  ))}
                 </div>
 
-                <button onClick={()=>{setResult(null);setInput('');}}
-                  style={{display:'block',width:'100%',maxWidth:680,margin:'24px auto 0',padding:'14px',background:'transparent',color:'#3A3833',border:'1px solid #C9C2B2',fontSize:13,letterSpacing:'0.2em',cursor:'pointer'}}>
-                  もう一度相談する
-                </button>
+                {!loading && result && (
+                  <button onClick={()=>{setResult(null);setInput('');}}
+                    style={{display:'block',width:'100%',maxWidth:680,margin:'24px auto 0',padding:'14px',background:'transparent',color:'#3A3833',border:'1px solid #C9C2B2',fontSize:13,letterSpacing:'0.2em',cursor:'pointer'}}>
+                    もう一度相談する
+                  </button>
+                )}
               </div>
             )}
 
-            <footer style={{marginTop:64,paddingTop:28,borderTop:'1px solid #EAE6DC',fontSize:10,color:'#8B8780',textAlign:'center',letterSpacing:'0.1em',lineHeight:2,maxWidth:680,margin:'64px auto 0'}}>
+            <footer style={{paddingTop:28,borderTop:'1px solid #EAE6DC',fontSize:10,color:'#8B8780',textAlign:'center',letterSpacing:'0.1em',lineHeight:2,maxWidth:680,margin:'64px auto 0'}}>
               本サービスはAIによる提案です。<br />
               商品の在庫・仕様は無印良品ネットストアでご確認ください。<br />
               <button onClick={()=>setShowSettings(true)}
