@@ -137,7 +137,7 @@
           setResult(parsed);
         } catch (e) {
           console.error(e);
-          setError('提案の取得に失敗しました。もう一度お試しください。');
+          setError('エラー: ' + (e.message || JSON.stringify(e)));
         } finally {
           setLoading(false);
         }
